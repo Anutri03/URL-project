@@ -267,6 +267,40 @@ def get_features():
             "status": "error"
         }), 500
 
+@app.route('/debug', methods=['GET'])
+def debug():
+    """Debug endpoint to check model loading status"""
+    try:
+        debug_info = {
+            "model_loaded": model is not None,
+            "model_type": str(type(model)) if model else None,
+            "current_directory": os.getcwd(),
+            "files_in_directory": os.listdir('.'),
+            "model_files": {
+                "model_clean.pkl": os.path.exists('model_clean.pkl'),
+                "model.txt": os.path.exists('model.txt'),
+                "phishing_model.pkl": os.path.exists('phishing_model.pkl')
+            }
+        }
+        
+        # Try to load model if not loaded
+        if model is None:
+            debug_info["loading_attempt"] = "Attempting to load model..."
+            try:
+                load_model()
+                debug_info["loading_result"] = "Model loading attempted"
+                debug_info["model_loaded_after_attempt"] = model is not None
+            except Exception as e:
+                debug_info["loading_error"] = str(e)
+        
+        return jsonify(debug_info)
+        
+    except Exception as e:
+        return jsonify({
+            "error": f"Debug failed: {str(e)}",
+            "status": "error"
+        }), 500
+
 if __name__ == '__main__':
     # Load model on startup
     load_model()
