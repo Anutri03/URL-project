@@ -1,0 +1,35 @@
+# Large dataset files
+url_dataset_balanced.csv
+*.csv
+
+# Model files (keep the clean ones for deployment)
+phishing_model.pkl
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+host_venv/
+venv/
+env/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
