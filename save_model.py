@@ -1,13 +1,15 @@
 """
-Script to save the trained LightGBM model for deployment
-Run this after training your model to save it in the correct format
+Script to train and save the URL phishing detection model
+This script will be run during deployment to create the model file
 """
 
 import pandas as pd
-import lightgbm as lgb
-import joblib
+import numpy as np
 import re
+import joblib
+import lightgbm as lgb
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_auc_score
 
 def extract_features(url):
     """Extract lexical features from URL"""
@@ -29,26 +31,30 @@ def extract_features(url):
         "has_ip": int(re.match(r"^https?:\/\/\d+\.\d+\.\d+\.\d+", url) is not None)
     }
 
-def train_and_save_model():
-    """Train the model and save it for deployment"""
+def train_model():
+    """Train the LightGBM model"""
     print("Loading dataset...")
     df = pd.read_csv("url_dataset_balanced.csv")
     print(f"Dataset shape: {df.shape}")
+    print(f"Label distribution:\n{df['label'].value_counts()}")
     
+    # Extract features
     print("Extracting features...")
     features = df['url'].apply(extract_features)
     X = pd.DataFrame(features.tolist())
     y = df['label']
     
+    # Train-test split
     print("Splitting data...")
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
     
+    # Train LightGBM model
     print("Training LightGBM model...")
     train_data = lgb.Dataset(X_train, label=y_train)
     test_data = lgb.Dataset(X_test, label=y_test)
-
+    
     params = {
         "objective": "binary",
         "metric": "binary_logloss",
@@ -60,7 +66,7 @@ def train_and_save_model():
         "bagging_freq": 5,
         "verbose": -1,
     }
-
+    
     model = lgb.train(
         params,
         train_data,
@@ -69,32 +75,40 @@ def train_and_save_model():
         callbacks=[lgb.early_stopping(stopping_rounds=50, verbose=100)]
     )
     
-    print("Saving model...")
-    # Save model in LightGBM format
-    model.save_model('model.txt')
+    # Evaluate model
+    print("Evaluating model...")
+    y_pred = (model.predict(X_test) > 0.5).astype(int)
     
-    # Also save using joblib for compatibility
-    joblib.dump(model, 'model.joblib')
+    accuracy = accuracy_score(y_test, y_pred)
+    roc_auc = roc_auc_score(y_test, model.predict(X_test))
     
-    # Save feature names for reference
-    feature_names = X_train.columns.tolist()
-    joblib.dump(feature_names, 'feature_names.joblib')
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"ROC-AUC Score: {roc_auc:.4f}")
+    print("\nClassification Report:")
+    print(classification_report(y_test, y_pred))
     
-    print("Model saved successfully!")
-    print(f"Model files created:")
-    print(f"- model.txt (LightGBM format)")
-    print(f"- model.joblib (Joblib format)")
-    print(f"- feature_names.joblib (Feature names)")
-    
-    # Test the saved model
-    print("\nTesting saved model...")
-    test_url = "https://www.plugintoai.com"
-    features = extract_features(test_url)
-    X_test = pd.DataFrame([features])
-    probability = model.predict(X_test)[0]
-    prediction = "phishing" if probability > 0.5 else "safe"
-    print(f"Test URL: {test_url}")
-    print(f"Prediction: {prediction} (Probability: {probability:.2f})")
+    return model, extract_features
+
+def save_model(model, extract_features_func, filename="phishing_model.pkl"):
+    """Save the trained model and feature extractor"""
+    package = {
+        "model": model,
+        "extract_features": extract_features_func
+    }
+    joblib.dump(package, filename)
+    print(f"✅ Model saved as {filename}")
+
+def main():
+    """Main function"""
+    try:
+        print("🚀 Starting model training...")
+        model, extract_features_func = train_model()
+        save_model(model, extract_features_func)
+        print("✅ Model training and saving completed successfully!")
+        
+    except Exception as e:
+        print(f"❌ Error during model training: {e}")
+        raise e
 
 if __name__ == "__main__":
-    train_and_save_model()
+    main()

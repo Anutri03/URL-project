@@ -1,312 +1,288 @@
-"""
-URL Phishing Detection API
-A Flask API that detects phishing URLs using machine learning
-"""
-
 import os
 import re
 import pandas as pd
-import lightgbm as lgb
+import numpy as np
 import joblib
+import lightgbm as lgb
 from flask import Flask, request, jsonify
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_auc_score
 
 app = Flask(__name__)
 
-# Global variables for model and feature names
+# Global variables for model and feature extractor
 model = None
-feature_names = None
+extract_features = None
 
-def extract_features(url):
+def extract_features_func(url):
     """Extract lexical features from URL"""
-    try:
-        return {
-            "url_length": len(url),
-            "path_length": len(url.split("//")[-1].split("/", 1)[-1]) if "/" in url.split("//")[-1] else 0,
-            "query_length": len(url.split("?")[-1]) if "?" in url else 0,
-            "num_digits": sum(c.isdigit() for c in url),
-            "num_letters": sum(c.isalpha() for c in url),
-            "num_special": sum(not c.isalnum() for c in url),
-            "count_dot": min(url.count('.'), 4),  # capped at 4
-            "count_dash": url.count('-'),
-            "count_slash": url.count('/'),
-            "count_at": url.count('@'),
-            "count_qmark": url.count('?'),
-            "count_percent": url.count('%'),
-            "count_equal": url.count('='),
-            "has_https": int("https" in url.lower()),
-            "has_ip": int(re.match(r"^https?:\/\/\d+\.\d+\.\d+\.\d+", url) is not None)
-        }
-    except Exception as e:
-        logger.error(f"Error extracting features from URL {url}: {str(e)}")
-        return None
+    return {
+        "url_length": len(url),
+        "path_length": len(url.split("//")[-1].split("/", 1)[-1]) if "/" in url.split("//")[-1] else 0,
+        "query_length": len(url.split("?")[-1]) if "?" in url else 0,
+        "num_digits": sum(c.isdigit() for c in url),
+        "num_letters": sum(c.isalpha() for c in url),
+        "num_special": sum(not c.isalnum() for c in url),
+        "count_dot": min(url.count('.'), 4),  # capped at 4
+        "count_dash": url.count('-'),
+        "count_slash": url.count('/'),
+        "count_at": url.count('@'),
+        "count_qmark": url.count('?'),
+        "count_percent": url.count('%'),
+        "count_equal": url.count('='),
+        "has_https": int("https" in url.lower()),
+        "has_ip": int(re.match(r"^https?:\/\/\d+\.\d+\.\d+\.\d+", url) is not None)
+    }
 
 def load_model():
     """Load the trained model"""
-    global model, feature_names
+    global model, extract_features
     
     try:
-        # Try to load the main model first
-        if os.path.exists('model.txt'):
-            logger.info("Loading model.txt...")
-            model = lgb.Booster(model_file='model.txt')
-        elif os.path.exists('phishing_model.pkl'):
-            logger.info("Loading phishing_model.pkl...")
-            model = joblib.load('phishing_model.pkl')
-        elif os.path.exists('model_clean.pkl'):
-            logger.info("Loading model_clean.pkl...")
-            model = joblib.load('model_clean.pkl')
-        elif os.path.exists('model_lightweight.txt'):
-            logger.info("Loading model_lightweight.txt...")
-            model = lgb.Booster(model_file='model_lightweight.txt')
-        elif os.path.exists('model_lightweight.pkl'):
-            logger.info("Loading model_lightweight.pkl...")
-            model = joblib.load('model_lightweight.pkl')
+        # Try to load the saved model
+        if os.path.exists("phishing_model.pkl"):
+            package = joblib.load("phishing_model.pkl")
+            model = package["model"]
+            extract_features = package["extract_features"]
+            print("✅ Model loaded successfully from phishing_model.pkl")
         else:
-            logger.error("No model file found!")
-            return False
+            # If no saved model, train a new one
+            print("⚠️ No saved model found. Training new model...")
+            train_and_save_model()
             
-        # Try to load feature names if available
-        if os.path.exists('feature_names.joblib'):
-            feature_names = joblib.load('feature_names.joblib')
-            logger.info(f"Loaded feature names: {feature_names}")
-        else:
-            # Default feature names
-            feature_names = [
-                "url_length", "path_length", "query_length", "num_digits", "num_letters",
-                "num_special", "count_dot", "count_dash", "count_slash", "count_at",
-                "count_qmark", "count_percent", "count_equal", "has_https", "has_ip"
-            ]
-            logger.info("Using default feature names")
-            
-        logger.info("Model loaded successfully!")
-        return True
+    except Exception as e:
+        print(f"❌ Error loading model: {e}")
+        print("⚠️ Training new model...")
+        train_and_save_model()
+
+def train_and_save_model():
+    """Train and save the model"""
+    global model, extract_features
+    
+    try:
+        # Load dataset
+        df = pd.read_csv("url_dataset_balanced.csv")
+        print(f"Dataset loaded: {df.shape}")
+        
+        # Extract features
+        features = df['url'].apply(extract_features_func)
+        X = pd.DataFrame(features.tolist())
+        y = df['label']
+        
+        # Train-test split
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
+        
+        # Train LightGBM model
+        train_data = lgb.Dataset(X_train, label=y_train)
+        test_data = lgb.Dataset(X_test, label=y_test)
+        
+        params = {
+            "objective": "binary",
+            "metric": "binary_logloss",
+            "boosting_type": "gbdt",
+            "num_leaves": 64,
+            "learning_rate": 0.05,
+            "feature_fraction": 0.9,
+            "bagging_fraction": 0.8,
+            "bagging_freq": 5,
+            "verbose": -1,
+        }
+        
+        model = lgb.train(
+            params,
+            train_data,
+            valid_sets=[train_data, test_data],
+            num_boost_round=1000,
+            callbacks=[lgb.early_stopping(stopping_rounds=50, verbose=False)]
+        )
+        
+        # Save model
+        package = {
+            "model": model,
+            "extract_features": extract_features_func
+        }
+        joblib.dump(package, "phishing_model.pkl")
+        extract_features = extract_features_func
+        
+        print("✅ Model trained and saved successfully")
         
     except Exception as e:
-        logger.error(f"Error loading model: {str(e)}")
-        return False
+        print(f"❌ Error training model: {e}")
+        raise e
 
 def predict_url(url):
-    """Predict if a URL is phishing or safe"""
-    global model, feature_names
-    
+    """Predict if URL is phishing or safe"""
     try:
         # Extract features
         features = extract_features(url)
-        if features is None:
-            return None
-            
-        # Convert to DataFrame
-        X = pd.DataFrame([features])
+        X_new = pd.DataFrame([features])
         
-        # Make prediction
-        if hasattr(model, 'predict'):
-            # LightGBM model
-            probability = model.predict(X)[0]
-        else:
-            # Scikit-learn model
-            probability = model.predict_proba(X)[0][1]
-            
+        # Predict probability
+        prob = model.predict(X_new)[0]
+        
         # Determine prediction
-        prediction = "phishing" if probability > 0.5 else "safe"
-        confidence = abs(probability - 0.5) * 2  # Scale to 0-1
+        prediction = "phishing" if prob > 0.5 else "safe"
+        confidence = max(prob, 1 - prob)
         
         return {
             "url": url,
             "prediction": prediction,
-            "probability": float(probability),
+            "probability": float(prob),
             "confidence": float(confidence),
             "status": "success"
         }
         
     except Exception as e:
-        logger.error(f"Error predicting URL {url}: {str(e)}")
-        return None
+        return {
+            "error": f"Prediction failed: {str(e)}",
+            "status": "error"
+        }
 
-@app.route('/', methods=['GET'])
+@app.route("/", methods=["GET"])
 def health_check():
     """Health check endpoint"""
-    global model
-    
-    model_status = "loaded" if model is not None else "not loaded"
-    
     return jsonify({
-        "status": "API is running",
-        "model_status": model_status,
-        "version": "1.0.0",
+        "status": "healthy",
+        "message": "URL Phishing Detection API is running",
+        "model_loaded": model is not None,
         "endpoints": {
-            "/": "Health check",
-            "/predict": "Single URL prediction",
-            "/predict_batch": "Batch URL prediction",
-            "/features": "Extract features from URL"
+            "predict": "POST /predict - Single URL prediction",
+            "predict_batch": "POST /predict_batch - Batch URL prediction",
+            "features": "POST /features - Extract URL features"
         }
     })
 
-@app.route('/predict', methods=['POST'])
+@app.route("/predict", methods=["POST"])
 def predict_single():
-    """Predict a single URL"""
-    global model
-    
-    if model is None:
-        return jsonify({
-            "error": "Model not loaded",
-            "status": "error"
-        }), 500
-    
+    """Single URL prediction endpoint"""
     try:
         data = request.get_json()
         
-        if not data or 'url' not in data:
+        if not data or "url" not in data:
             return jsonify({
-                "error": "Missing 'url' field in request",
+                "error": "Missing 'url' field in request body",
                 "status": "error"
             }), 400
-            
-        url = data['url']
         
-        if not url or not isinstance(url, str):
+        url = data["url"]
+        
+        if not isinstance(url, str) or not url.strip():
             return jsonify({
-                "error": "Invalid URL provided",
+                "error": "URL must be a non-empty string",
                 "status": "error"
             }), 400
-            
-        result = predict_url(url)
         
-        if result is None:
-            return jsonify({
-                "error": "Failed to process URL",
-                "status": "error"
-            }), 500
-            
+        result = predict_url(url.strip())
+        
+        if result["status"] == "error":
+            return jsonify(result), 500
+        
         return jsonify(result)
         
     except Exception as e:
-        logger.error(f"Error in predict_single: {str(e)}")
         return jsonify({
-            "error": "Internal server error",
+            "error": f"Internal server error: {str(e)}",
             "status": "error"
         }), 500
 
-@app.route('/predict_batch', methods=['POST'])
+@app.route("/predict_batch", methods=["POST"])
 def predict_batch():
-    """Predict multiple URLs"""
-    global model
-    
-    if model is None:
-        return jsonify({
-            "error": "Model not loaded",
-            "status": "error"
-        }), 500
-    
+    """Batch URL prediction endpoint"""
     try:
         data = request.get_json()
         
-        if not data or 'urls' not in data:
+        if not data or "urls" not in data:
             return jsonify({
-                "error": "Missing 'urls' field in request",
+                "error": "Missing 'urls' field in request body",
                 "status": "error"
             }), 400
-            
-        urls = data['urls']
+        
+        urls = data["urls"]
         
         if not isinstance(urls, list):
             return jsonify({
-                "error": "'urls' must be a list",
+                "error": "URLs must be a list",
                 "status": "error"
             }), 400
-            
+        
         if len(urls) > 100:
             return jsonify({
-                "error": "Maximum 100 URLs allowed per request",
+                "error": "Maximum 100 URLs allowed per batch",
                 "status": "error"
             }), 400
-            
+        
+        if not urls:
+            return jsonify({
+                "error": "URLs list cannot be empty",
+                "status": "error"
+            }), 400
+        
         results = []
         for url in urls:
-            if not url or not isinstance(url, str):
+            if not isinstance(url, str) or not url.strip():
                 results.append({
                     "url": url,
-                    "error": "Invalid URL",
-                    "status": "error"
-                })
-                continue
-                
-            result = predict_url(url)
-            if result is None:
-                results.append({
-                    "url": url,
-                    "error": "Failed to process URL",
+                    "error": "URL must be a non-empty string",
                     "status": "error"
                 })
             else:
+                result = predict_url(url.strip())
                 results.append(result)
-                
+        
         return jsonify({
             "results": results,
-            "total_processed": len(results),
+            "total": len(results),
             "status": "success"
         })
         
     except Exception as e:
-        logger.error(f"Error in predict_batch: {str(e)}")
         return jsonify({
-            "error": "Internal server error",
+            "error": f"Internal server error: {str(e)}",
             "status": "error"
         }), 500
 
-@app.route('/features', methods=['POST'])
+@app.route("/features", methods=["POST"])
 def extract_url_features():
-    """Extract features from a URL"""
+    """Extract features from URL"""
     try:
         data = request.get_json()
         
-        if not data or 'url' not in data:
+        if not data or "url" not in data:
             return jsonify({
-                "error": "Missing 'url' field in request",
+                "error": "Missing 'url' field in request body",
                 "status": "error"
             }), 400
-            
-        url = data['url']
         
-        if not url or not isinstance(url, str):
+        url = data["url"]
+        
+        if not isinstance(url, str) or not url.strip():
             return jsonify({
-                "error": "Invalid URL provided",
+                "error": "URL must be a non-empty string",
                 "status": "error"
             }), 400
-            
-        features = extract_features(url)
         
-        if features is None:
-            return jsonify({
-                "error": "Failed to extract features",
-                "status": "error"
-            }), 500
-            
+        features = extract_features(url.strip())
+        
         return jsonify({
-            "url": url,
+            "url": url.strip(),
             "features": features,
             "status": "success"
         })
         
     except Exception as e:
-        logger.error(f"Error in extract_url_features: {str(e)}")
         return jsonify({
-            "error": "Internal server error",
+            "error": f"Internal server error: {str(e)}",
             "status": "error"
         }), 500
 
-# Load model on startup
-with app.app_context():
-    if not load_model():
-        logger.error("Failed to load model on startup!")
-    else:
-        logger.info("Model loaded successfully on startup!")
-
-if __name__ == '__main__':
-    # For local development
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+if __name__ == "__main__":
+    # Load model on startup
+    load_model()
+    
+    # Get port from environment variable (for Hugging Face Spaces)
+    port = int(os.environ.get("PORT", 7860))
+    
+    # Run the app
+    app.run(host="0.0.0.0", port=port, debug=False)
