@@ -39,22 +39,45 @@ def load_model():
         print(f"Current working directory: {os.getcwd()}")
         print(f"Files in current directory: {os.listdir('.')}")
         
-        # Try to load from clean pickle first (most reliable)
-        if os.path.exists('model_clean.pkl'):
-            print("Loading model_clean.pkl...")
-            model = joblib.load('model_clean.pkl')
-            print(f"Model type: {type(model)}")
-        # Try to load from phishing_model.pkl (as requested)
-        elif os.path.exists('phishing_model.pkl'):
+        # Try to load from phishing_model.pkl first (as requested)
+        if os.path.exists('phishing_model.pkl'):
             print("Loading phishing_model.pkl...")
             try:
+                # Add the extract_features function to the global namespace temporarily
+                import sys
+                import types
+                
+                # Create a mock extract_features function
+                def mock_extract_features(url):
+                    return {
+                        "url_length": len(url),
+                        "path_length": len(url.split("//")[-1].split("/", 1)[-1]) if "/" in url.split("//")[-1] else 0,
+                        "query_length": len(url.split("?")[-1]) if "?" in url else 0,
+                        "num_digits": sum(c.isdigit() for c in url),
+                        "num_letters": sum(c.isalpha() for c in url),
+                        "num_special": sum(not c.isalnum() for c in url),
+                        "count_dot": min(url.count('.'), 4),
+                        "count_dash": url.count('-'),
+                        "count_slash": url.count('/'),
+                        "count_at": url.count('@'),
+                        "count_qmark": url.count('?'),
+                        "count_percent": url.count('%'),
+                        "count_equal": url.count('='),
+                        "has_https": int("https" in url.lower()),
+                        "has_ip": int(re.match(r"^https?:\/\/\d+\.\d+\.\d+\.\d+", url) is not None)
+                    }
+                
+                # Add to __main__ module
+                import __main__
+                __main__.extract_features = mock_extract_features
+                
                 model_dict = joblib.load('phishing_model.pkl')
                 if isinstance(model_dict, dict) and 'model' in model_dict:
                     model = model_dict['model']
-                    print(f"Extracted model type: {type(model)}")
+                    print(f"Successfully loaded model from phishing_model.pkl: {type(model)}")
                 else:
                     model = model_dict
-                    print(f"Model type: {type(model)}")
+                    print(f"Successfully loaded model from phishing_model.pkl: {type(model)}")
             except Exception as e:
                 print(f"Error loading phishing_model.pkl: {e}")
                 print("Falling back to model_clean.pkl...")
@@ -63,6 +86,11 @@ def load_model():
                     print(f"Fallback model type: {type(model)}")
                 else:
                     raise e
+        # Try to load from clean pickle
+        elif os.path.exists('model_clean.pkl'):
+            print("Loading model_clean.pkl...")
+            model = joblib.load('model_clean.pkl')
+            print(f"Model type: {type(model)}")
         # Try to load from LightGBM format
         elif os.path.exists('model.txt'):
             print("Loading model.txt...")
