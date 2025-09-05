@@ -39,8 +39,18 @@ def load_model():
         print(f"Current working directory: {os.getcwd()}")
         print(f"Files in current directory: {os.listdir('.')}")
         
-        # Try to load from clean pickle first
-        if os.path.exists('model_clean.pkl'):
+        # Try to load from phishing_model.pkl first (as requested)
+        if os.path.exists('phishing_model.pkl'):
+            print("Loading phishing_model.pkl...")
+            model_dict = joblib.load('phishing_model.pkl')
+            if isinstance(model_dict, dict) and 'model' in model_dict:
+                model = model_dict['model']
+                print(f"Extracted model type: {type(model)}")
+            else:
+                model = model_dict
+                print(f"Model type: {type(model)}")
+        # Try to load from clean pickle
+        elif os.path.exists('model_clean.pkl'):
             print("Loading model_clean.pkl...")
             model = joblib.load('model_clean.pkl')
             print(f"Model type: {type(model)}")
@@ -54,16 +64,6 @@ def load_model():
             print("Loading model.joblib...")
             model = joblib.load('model.joblib')
             print(f"Model type: {type(model)}")
-        # Try to load from original pickle (with dict structure)
-        elif os.path.exists('phishing_model.pkl'):
-            print("Loading phishing_model.pkl...")
-            model_dict = joblib.load('phishing_model.pkl')
-            if isinstance(model_dict, dict) and 'model' in model_dict:
-                model = model_dict['model']
-                print(f"Extracted model type: {type(model)}")
-            else:
-                model = model_dict
-                print(f"Model type: {type(model)}")
         else:
             raise FileNotFoundError("No model file found")
         print("Model loaded successfully")
