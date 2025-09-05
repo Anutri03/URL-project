@@ -35,36 +35,58 @@ def load_model():
     """Load the trained model"""
     global model
     try:
+        print("Starting model loading...")
+        print(f"Current working directory: {os.getcwd()}")
+        print(f"Files in current directory: {os.listdir('.')}")
+        
         # Try to load from clean pickle first
         if os.path.exists('model_clean.pkl'):
+            print("Loading model_clean.pkl...")
             model = joblib.load('model_clean.pkl')
+            print(f"Model type: {type(model)}")
         # Try to load from LightGBM format
         elif os.path.exists('model.txt'):
+            print("Loading model.txt...")
             model = lgb.Booster(model_file='model.txt')
+            print(f"Model type: {type(model)}")
         # Try to load from joblib format
         elif os.path.exists('model.joblib'):
+            print("Loading model.joblib...")
             model = joblib.load('model.joblib')
+            print(f"Model type: {type(model)}")
         # Try to load from original pickle (with dict structure)
         elif os.path.exists('phishing_model.pkl'):
+            print("Loading phishing_model.pkl...")
             model_dict = joblib.load('phishing_model.pkl')
             if isinstance(model_dict, dict) and 'model' in model_dict:
                 model = model_dict['model']
+                print(f"Extracted model type: {type(model)}")
             else:
                 model = model_dict
+                print(f"Model type: {type(model)}")
         else:
             raise FileNotFoundError("No model file found")
         print("Model loaded successfully")
     except Exception as e:
         print(f"Error loading model: {e}")
+        import traceback
+        traceback.print_exc()
         model = None
 
 @app.route('/', methods=['GET'])
 def home():
     """Health check endpoint"""
+    model_status = "loaded" if model is not None else "not loaded"
     return jsonify({
         "message": "URL Phishing Detection API",
         "status": "running",
-        "model_loaded": model is not None
+        "model_loaded": model is not None,
+        "model_status": model_status,
+        "available_files": {
+            "model_clean.pkl": os.path.exists('model_clean.pkl'),
+            "model.txt": os.path.exists('model.txt'),
+            "phishing_model.pkl": os.path.exists('phishing_model.pkl')
+        }
     })
 
 @app.route('/predict', methods=['POST'])
