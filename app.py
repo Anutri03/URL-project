@@ -39,21 +39,30 @@ def load_model():
         print(f"Current working directory: {os.getcwd()}")
         print(f"Files in current directory: {os.listdir('.')}")
         
-        # Try to load from phishing_model.pkl first (as requested)
-        if os.path.exists('phishing_model.pkl'):
-            print("Loading phishing_model.pkl...")
-            model_dict = joblib.load('phishing_model.pkl')
-            if isinstance(model_dict, dict) and 'model' in model_dict:
-                model = model_dict['model']
-                print(f"Extracted model type: {type(model)}")
-            else:
-                model = model_dict
-                print(f"Model type: {type(model)}")
-        # Try to load from clean pickle
-        elif os.path.exists('model_clean.pkl'):
+        # Try to load from clean pickle first (most reliable)
+        if os.path.exists('model_clean.pkl'):
             print("Loading model_clean.pkl...")
             model = joblib.load('model_clean.pkl')
             print(f"Model type: {type(model)}")
+        # Try to load from phishing_model.pkl (as requested)
+        elif os.path.exists('phishing_model.pkl'):
+            print("Loading phishing_model.pkl...")
+            try:
+                model_dict = joblib.load('phishing_model.pkl')
+                if isinstance(model_dict, dict) and 'model' in model_dict:
+                    model = model_dict['model']
+                    print(f"Extracted model type: {type(model)}")
+                else:
+                    model = model_dict
+                    print(f"Model type: {type(model)}")
+            except Exception as e:
+                print(f"Error loading phishing_model.pkl: {e}")
+                print("Falling back to model_clean.pkl...")
+                if os.path.exists('model_clean.pkl'):
+                    model = joblib.load('model_clean.pkl')
+                    print(f"Fallback model type: {type(model)}")
+                else:
+                    raise e
         # Try to load from LightGBM format
         elif os.path.exists('model.txt'):
             print("Loading model.txt...")
